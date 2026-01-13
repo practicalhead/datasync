@@ -1,0 +1,44 @@
+# Hive Data Transfer Job Template
+# Copy this file and customize for your use case
+
+job_id: "my_transfer_job"
+job_name: "My Data Transfer Job"
+
+source_cluster:
+  name: "source-cluster"
+  hive_metastore_uri: "thrift://source-metastore:9083"
+  hdfs_namenode: "hdfs://source-namenode:8020"
+  # kerberos_principal: "user@REALM.COM"
+  # kerberos_keytab: "/path/to/keytab"
+  staging_path: "/tmp/datasync/staging"
+
+target_cluster:
+  name: "target-cluster"
+  hive_metastore_uri: "thrift://target-metastore:9083"
+  hdfs_namenode: "hdfs://target-namenode:8020"
+  # kerberos_principal: "user@REALM.COM"
+  # kerberos_keytab: "/path/to/keytab"
+  staging_path: "/tmp/datasync/staging"
+
+tables:
+  - source_database: "source_db"
+    source_table: "my_table"
+    target_database: "target_db"
+    target_table: "my_table"
+    columns:
+      - name: "col1"
+      - name: "col2"
+      - name: "col3"
+    filters:
+      - condition: "col1 = 'value'"
+    output_format: "parquet"
+    compression: "snappy"
+
+transfer:
+  method: "distcp"
+  bandwidth_limit_mb: 100
+  parallel_maps: 10
+
+audit:
+  enabled: true
+  log_path: "/var/log/datasync"

@@ -1,0 +1,231 @@
+# =============================================================================
+# Hive Data Transfer Job Configuration
+# =============================================================================
+# This configuration defines a data transfer job that extracts filtered data
+# from Hive tables on a source Cloudera cluster and loads them into a target
+# Cloudera cluster.
+#
+# The three-phase workflow:
+# 1. EXTRACTION: Read from source Hive, apply filters, write to staging (Parquet)
+# 2. TRANSFER: Securely copy data between clusters using DistCp
+# 3. LOADING: Read from staging, create Hive tables on target cluster
+# =============================================================================
+
+# Job identification
+job_id: "customer_data_sync_001"
+job_name: "Customer Data Regional Sync - Region A to Region B"
+
+# Optional schedule (cron expression) for automated execution
+# schedule: "0 2 * * *"  # Daily at 2 AM
+
+# =============================================================================
+# Source Cluster Configuration (Region A)
+# =============================================================================
+source_cluster:
+  name: "region-a-cluster"
+
+  # Hive Metastore Thrift URI
+  hive_metastore_uri: "thrift://source-metastore.region-a.example.com:9083"
+
+  # HDFS NameNode URI
+  hdfs_namenode: "hdfs://source-namenode.region-a.example.com:8020"
+
+  # Kerberos authentication (required for secure clusters)
+  kerberos_principal: "datasync@REGION-A.EXAMPLE.COM"
+  kerberos_keytab: "/etc/security/keytabs/datasync.keytab"
+
+  # SSL/TLS encryption
+  ssl_enabled: true
+
+  # Staging directory for extracted data
+  staging_path: "/data/datasync/staging"
+
+# =============================================================================
+# Target Cluster Configuration (Region B)
+# =============================================================================
+target_cluster:
+  name: "region-b-cluster"
+
+  # Hive Metastore Thrift URI
+  hive_metastore_uri: "thrift://target-metastore.region-b.example.com:9083"
+
+  # HDFS NameNode URI
+  hdfs_namenode: "hdfs://target-namenode.region-b.example.com:8020"
+
+  # Kerberos authentication
+  kerberos_principal: "datasync@REGION-B.EXAMPLE.COM"
+  kerberos_keytab: "/etc/security/keytabs/datasync.keytab"
+
+  # SSL/TLS encryption
+  ssl_enabled: true
+
+  # Staging directory for received data
+  staging_path: "/data/datasync/staging"
+
+# =============================================================================
+# Tables to Transfer
+# =============================================================================
+# Define each table with source/target mapping, column selection, and filters
+tables:
+
+  # Example 1: Customer table with column selection and filtering
+  - source_database: "sales_db"
+    source_table: "customers"
+    target_database: "analytics_db"
+    target_table: "customers_region_b"
+
+    # Column selection - only these columns will be transferred
+    columns:
+      - name: "customer_id"
+      - name: "first_name"
+      - name: "last_name"
+      - name: "email"
+      - name: "region"
+      - name: "customer_segment"
+      - name: "created_date"
+      - name: "last_purchase_date"
+      # Columns NOT included: ssn, credit_card, internal_notes (PII/sensitive)
+
+    # Row-level filters (WHERE conditions)
+    filters:
+      - condition: "region = 'REGION_B'"
+        description: "Only transfer customers belonging to Region B"
+      - condition: "customer_status = 'ACTIVE'"
+        description: "Only active customers"
+      - condition: "created_date >= '2023-01-01'"
+        description: "Only customers created in 2023 or later"
+
+    # Partitioning for target table
+    partition_columns:
+      - "region"
+
+    # Output format and compression
+    output_format: "parquet"
+    compression: "snappy"
+
+    # Reduce file count for transfer efficiency
+    coalesce_partitions: 10
+
+  # Example 2: Orders table with date range filter
+  - source_database: "sales_db"
+    source_table: "orders"
+    target_database: "analytics_db"
+    target_table: "orders_region_b"
+
+    columns:
+      - name: "order_id"
+      - name: "customer_id"
+      - name: "order_date"
+      - name: "total_amount"
+      - name: "order_status"
+      - name: "shipping_region"
+      - name: "product_category"
+
+    filters:
+      - condition: "shipping_region = 'REGION_B'"
+        description: "Orders shipping to Region B"
+      - condition: "order_date >= date_sub(current_date(), 365)"
+        description: "Last 365 days of orders"
+      - condition: "order_status != 'CANCELLED'"
+        description: "Exclude cancelled orders"
+
+    partition_columns:
+      - "order_date"
+
+    output_format: "parquet"
+    compression: "snappy"
+    coalesce_partitions: 20
+
+  # Example 3: Product catalog (full sync, no filtering)
+  - source_database: "catalog_db"
+    source_table: "products"
+    target_database: "analytics_db"
+    target_table: "products"
+
+    # Empty columns list means select all columns
+    columns: []
+
+    # No filters - full table sync
+    filters: []
+
+    output_format: "parquet"
+    compression: "snappy"
+
+# =============================================================================
+# Transfer Configuration
+# =============================================================================
+transfer:
+  # Transfer method: distcp (recommended), webhdfs
+  method: "distcp"
+
+  # Bandwidth limit in MB/s (prevents network saturation)
+  bandwidth_limit_mb: 100
+
+  # Number of parallel map tasks for DistCp
+  parallel_maps: 20
+
+  # Skip CRC checksum (faster but less safe)
+  skip_checksum: false
+
+  # Preserve file permissions
+  preserve_permissions: true
+
+  # Enable wire encryption
+  encryption_enabled: true
+
+  # Use Kerberos for authentication
+  kerberos_enabled: true
+
+  # Retry configuration
+  retry_count: 3
+  retry_delay_seconds: 60
+
+# =============================================================================
+# Audit and Logging Configuration
+# =============================================================================
+audit:
+  # Enable audit logging
+  enabled: true
+
+  # Directory for audit logs
+  log_path: "/var/log/datasync"
+
+  # Include row counts in audit events
+  include_row_counts: true
+
+  # Include checksums for data integrity verification
+  include_checksums: true
+
+  # Email notification on completion
+  notify_on_completion: true
+  notification_email: "data-ops@example.com"
+
+# =============================================================================
+# Spark Configuration
+# =============================================================================
+# Additional Spark configurations for the extraction and loading jobs
+spark_config:
+  # Memory configuration
+  spark.driver.memory: "4g"
+  spark.executor.memory: "8g"
+  spark.executor.cores: "4"
+
+  # Dynamic allocation
+  spark.dynamicAllocation.enabled: "true"
+  spark.dynamicAllocation.minExecutors: "2"
+  spark.dynamicAllocation.maxExecutors: "20"
+
+  # Shuffle optimization
+  spark.sql.shuffle.partitions: "200"
+
+  # Parquet optimization
+  spark.sql.parquet.compression.codec: "snappy"
+  spark.sql.parquet.mergeSchema: "false"
+
+  # Hive configuration
+  spark.sql.hive.convertMetastoreParquet: "true"
+  spark.sql.hive.metastore.version: "2.3.9"
+
+  # Security
+  spark.authenticate: "true"
+  spark.network.crypto.enabled: "true"

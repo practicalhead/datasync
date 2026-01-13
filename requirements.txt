@@ -1,0 +1,9 @@
+# DataSync - Python dependencies
+
+# Configuration management
+PyYAML>=6.0
+
+# Note: PySpark is typically provided by the Cloudera distribution
+# and should not be installed via pip in production environments.
+# Uncomment for local development/testing only:
+# pyspark>=3.0.0
