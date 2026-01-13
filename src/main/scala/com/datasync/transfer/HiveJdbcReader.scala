@@ -24,12 +24,40 @@ class HiveJdbcReader(spark: SparkSession, clusterConfig: ClusterConfig) {
 
   private val logger = LoggerFactory.getLogger(classOf[HiveJdbcReader])
 
+  /**
+   * JDBC URL with Kerberos authentication parameters appended if enabled.
+   *
+   * For Kerberos authentication, the URL must include:
+   *   ;principal=hive/hostname@REALM;auth=kerberos
+   *
+   * The Hive JDBC driver will then:
+   * 1. Get the current TGT from UserGroupInformation
+   * 2. Request a service ticket for the HiveServer2 principal
+   * 3. Use SASL/GSSAPI to authenticate the connection
+   */
+  private val effectiveJdbcUrl: String = {
+    if (clusterConfig.kerberosEnabled) {
+      val principal = clusterConfig.kerberosPrincipal.getOrElse(
+        throw new IllegalArgumentException("Kerberos principal required for secured cluster"))
+
+      // Append Kerberos params to JDBC URL if not already present
+      if (clusterConfig.hiveJdbcUrl.contains("principal=")) {
+        clusterConfig.hiveJdbcUrl
+      } else {
+        s"${clusterConfig.hiveJdbcUrl};principal=$principal;auth=kerberos"
+      }
+    } else {
+      clusterConfig.hiveJdbcUrl
+    }
+  }
+
   private val connectionProperties: Properties = {
     val props = new Properties()
     props.setProperty("driver", "org.apache.hive.jdbc.HiveDriver")
 
     if (clusterConfig.kerberosEnabled) {
-      props.setProperty("AuthMech", "1")
+      // These properties are for Cloudera/Simba JDBC driver
+      props.setProperty("AuthMech", "1")  // 1 = Kerberos
       props.setProperty("KrbRealm", extractKerberosRealm(clusterConfig.kerberosPrincipal.get))
       props.setProperty("KrbHostFQDN", extractKerberosHost(clusterConfig.hiveJdbcUrl))
       props.setProperty("KrbServiceName", "hive")
@@ -62,10 +90,10 @@ class HiveJdbcReader(spark: SparkSession, clusterConfig: ClusterConfig) {
     }
 
     logger.info(s"Reading from source cluster via JDBC: $query")
-    logger.info(s"JDBC URL: ${clusterConfig.hiveJdbcUrl}")
+    logger.info(s"JDBC URL: $effectiveJdbcUrl")
 
     spark.read
-      .jdbc(clusterConfig.hiveJdbcUrl, query, connectionProperties)
+      .jdbc(effectiveJdbcUrl, query, connectionProperties)
   }
 
   /**
@@ -105,7 +133,7 @@ class HiveJdbcReader(spark: SparkSession, clusterConfig: ClusterConfig) {
 
     spark.read
       .jdbc(
-        clusterConfig.hiveJdbcUrl,
+        effectiveJdbcUrl,
         query,
         partitionColumn,
         lowerBound,
@@ -146,7 +174,7 @@ class HiveJdbcReader(spark: SparkSession, clusterConfig: ClusterConfig) {
     logger.info(s"Number of partition predicates: ${predicates.length}")
 
     spark.read
-      .jdbc(clusterConfig.hiveJdbcUrl, baseQuery, predicates, connectionProperties)
+      .jdbc(effectiveJdbcUrl, baseQuery, predicates, connectionProperties)
   }
 
   /**
@@ -163,7 +191,7 @@ class HiveJdbcReader(spark: SparkSession, clusterConfig: ClusterConfig) {
     }
 
     spark.read
-      .jdbc(clusterConfig.hiveJdbcUrl, countQuery, connectionProperties)
+      .jdbc(effectiveJdbcUrl, countQuery, connectionProperties)
       .first()
       .getLong(0)
   }
